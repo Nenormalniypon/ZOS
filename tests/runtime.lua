@@ -27,6 +27,7 @@ local function newDisk(address,readOnly)
  function disk.exists(p) return entries[canonical(p)]~=nil end
  function disk.isDirectory(p)return entries[canonical(p)]==true end
  function disk.makeDirectory(p)
+  if entries[canonical(p)]~=nil then return false,"file or directory with that name already exists" end
   local cur=""
   for part in p:gmatch("[^/]+") do
    cur=cur.."/"..part
@@ -53,6 +54,7 @@ local function newDisk(address,readOnly)
  end
  function disk.read(h,count)
   local f=assert(handles[h]);local data=entries[f.path]
+  if count==math.huge then count=#data end
   if f.pos>#data then return nil end
   local chunk=data:sub(f.pos,f.pos+count-1);f.pos=f.pos+#chunk;return chunk
  end
@@ -134,7 +136,9 @@ local pathFS={}
 function pathFS.path(p)return p:match("^(.*/)[^/]*$") or "/" end
 function pathFS.canonical(p)return canonical(p) end
 function pathFS.get()return source end
-function pathFS.makeDirectory()return true end
+function pathFS.makeDirectory(p)return source.makeDirectory(p) end
+function pathFS.exists(p)return source.exists(p) end
+function pathFS.isDirectory(p)return source.isDirectory(p) end
 local serialization={}
 local function serialize(v)
  if type(v)=="table" then
@@ -216,7 +220,7 @@ print("PASS: EFI normal boot, F8 safe mode and F2 disk selection")
 -- Package manager with an in-memory MineOS Filesystem adapter.
 local disk=newDisk("packages")
 local appFS={}
-for _,name in ipairs({"exists","makeDirectory","rename","remove"}) do appFS[name]=disk[name] end
+for _,name in ipairs({"exists","isDirectory","makeDirectory","rename","remove"}) do appFS[name]=disk[name] end
 function appFS.path(p)return pathFS.path(p)end
 function appFS.size(p)return #assert(disk._entries[canonical(p)])end
 function appFS.open(p,mode)
@@ -346,3 +350,54 @@ for _,name in ipairs({"ZOS Hills","ZOS Teal"}) do
  assert(w.zosStatic);w.draw(w)
 end
 print("PASS: static wallpaper drawing bounds at 80x25")
+-- Bootstrap regression: mkdir fails on an existing directory, as on the user's OpenOS.
+local downloads=newDisk("downloads")
+local remote={
+ ['Installer/Manifest.lua']='return {files={{path="Applications/Test App.app/Main.lua",size=5},{path="Applications/Test App.app/Icon.pic",size=4,remotePath="Applications/Test App.app/Icon.pic.b64",encoding="base64"}}}',
+ ['Installer/install.lua']='-- mock installer',
+ ['NOTICE.md']='notice', ['README-RU.md']='readme',
+ ['system/Applications/Test App.app/Main.lua']='hello',
+ ['system/Applications/Test App.app/Icon.pic.b64']='AAH+/w=='
+}
+local mfs={}
+for _,name in ipairs({'exists','isDirectory','makeDirectory'}) do mfs[name]=downloads[name] end
+mfs.path=pathFS.path;mfs.get=function()return downloads end
+local mio={}
+function mio.open(path,mode)
+ local id,reason=downloads.open(path,mode);if not id then return nil,reason end
+ return {
+  write=function(self,s)local ok,why=downloads.write(id,s);if ok then return self end;return nil,why end,
+  read=function(_,format)return downloads.read(id,format=='*a' and math.huge or format)end,
+  close=function()return downloads.close(id)end
+ }
+end
+local requestCount=0
+local comp={internet={}}
+function comp.isAvailable(name)return name=='internet' end
+function comp.internet.request(url)
+ local prefix='https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/'
+ assert(url:sub(1,#prefix)==prefix)
+ local path=url:sub(#prefix+1):gsub('%%(%x%x)',function(h)return string.char(tonumber(h,16))end)
+ local data=assert(remote[path],path);local pos=1;requestCount=requestCount+1
+ return {finishConnect=function()return true end,response=function()return 200 end,
+  read=function(n)if pos>#data then return nil end;local chunk=data:sub(pos,pos+n-1);pos=pos+#chunk;return chunk end,
+  close=function()end}
+end
+local executed={}
+local msh={execute=function(path,_,root)executed[#executed+1]={path,root};return true end}
+local bmodules={component=comp,filesystem=mfs,computer=computer,shell=msh}
+local benv=setmetatable({require=function(n)return assert(bmodules[n])end,io=mio,print=function()end,
+ os=setmetatable({sleep=function()end},{__index=os})},{__index=_G})
+local bootstrapCode=file(ROOT..'/Installer/pastebin.lua')
+assert(load(bootstrapCode,'=bootstrap','t',benv))()
+assert(executed[1][2]=='/home/ZOS-download/')
+assert(downloads._entries['/home/ZOS-download/Installer/install.lua']=='-- mock installer')
+assert(downloads._entries['/home/ZOS-download/system/Applications/Test App.app/Main.lua']=='hello')
+-- Leave the prior attempt intact and run into an unused suffix directory.
+assert(load(bootstrapCode,'=bootstrap','t',benv))()
+assert(executed[2][2]=='/home/ZOS-download-2/')
+assert(downloads._entries['/home/ZOS-download/Installer/install.lua']=='-- mock installer')
+assert(downloads._entries['/home/ZOS-download-2/system/Applications/Test App.app/Icon.pic']==string.char(0,1,254,255))
+assert(requestCount==12)
+print('PASS: bootstrap strict mkdir semantics, reused parents, URL spaces and Base64 asset decoding')
+print('PASS: bootstrap rerun preserves old downloads and chooses an unused directory')

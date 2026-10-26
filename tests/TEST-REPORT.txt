@@ -11,4 +11,6 @@ PASS: occupied destination disk is refused without modification
 PASS: injected EEPROM flash failure rolls back firmware, label and boot data
 PASS: taskbar minimize/restore, Start menu callbacks, RU localization and resize
 PASS: static wallpaper drawing bounds at 80x25
+PASS: bootstrap strict mkdir semantics, reused parents, URL spaces and Base64 asset decoding
+PASS: bootstrap rerun preserves old downloads and chooses an unused directory
 All automated tests passed. Real OpenComputers testing remains required.
