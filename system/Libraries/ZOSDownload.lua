@@ -67,7 +67,8 @@ function module.new(o)
   safe(path);assert(not encoding or encoding=="base64","Unknown encoding")
   local url=host..path:gsub("([^%w%-%_%.%~/])",function(c)return string.format("%%%02X",c:byte())end)
   local address=assert(component.list("internet")(),"Internet card required")
-  local connection=assert(component.proxy(address).request(url))
+  local connection,requestReason=component.proxy(address).request(url)
+  assert(connection,"Cannot open request: "..url..": "..tostring(requestReason))
   local output
   local ok,why=xpcall(function()
    local deadline=computer.uptime()+90
@@ -90,9 +91,10 @@ function module.new(o)
     sleep(0)
    end
    if encoding then assert(output:write(decode64(table.concat(encoded)))) end
-  end,debug.traceback)
-  if output then output:close() end
-  connection.close();assert(ok,why)
+  end,function(err)return debug.traceback(tostring(err),2)end)
+  if output then pcall(output.close,output) end
+  pcall(connection.close)
+  assert(ok,"Download failed: "..info.path.."\nURL: "..url.."\nCause: "..tostring(why))
   assert(client.valid(dest..".part",info),"Downloaded file failed integrity check: "..info.path)
   commitFile(dest..".part",dest)
   return "downloaded"
