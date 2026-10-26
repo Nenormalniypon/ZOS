@@ -1,11 +1,11 @@
-# Официальный источник стандартных файлов MineOS
+# Minimal setup + deferred applications
 
-- Стандартные файлы скачиваются из IgorTimofeev/MineOS, закреплённая ревизия
-  fb6c529e4d16198ad37dcc538ada99754294a456.
-- Все эти ресурсы сверены побайтно с локальной сборкой.
-- Из репозитория ZOS нужны только собственные и изменённые текстовые файлы.
-- Иконка ZOS Packages загружается как копия официальной иконки App Market.
-- Проверены реальные raw-ссылки на проблемный файл .3dm и бинарную иконку.
+- Fix OpenOS startup: remove shell.getRunningProgram(); accept explicit distribution root.
+- Bootstrap now downloads setup metadata only, then opens setup choices.
+- Minimal default installs only system tools; optional apps install later via ZOS Software.
+- Add shared ZOSDownload with checksums, .part files and reuse of existing downloads.
+- Reuse the latest existing /home/ZOS-download[-N] directory, including -3 from the screenshot.
+- Save manifest/source configuration to installed /ZOS/ for the later application catalog.
 
 # GitHub MCP: полная публикация ресурсов
 

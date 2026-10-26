@@ -153,7 +153,7 @@ local event={pull=function()
  return "key_down","keyboard",0,key
 end}
 modules.component=component;modules.computer=computer;modules.filesystem=pathFS
-modules.shell={getRunningProgram=function()return ROOT.."/Installer/install.lua"end}
+modules.shell={} -- actual OpenOS has no getRunningProgram()
 modules.term=term;modules.event=event;modules.serialization=serialization
 local backups={}
 local fakeIO=setmetatable({},{__index=hostIO})
@@ -197,8 +197,12 @@ for _,item in ipairs(manifest.files) do
  if item.path:sub(1,10)=="Libraries/" then assert(target._entries["/"..item.path]==file(ROOT.."/system/"..item.path),item.path) end
 end
 assert(not target.exists("/Applications/3D Print.app"))
+assert(not target.exists("/Applications/App Market.app"))
+assert(not target.exists("/Applications/MineCode IDE.app"))
+assert(target.exists("/Applications/ZOS Software.app/Main.lua"))
+assert(target.exists("/ZOS/Manifest.lua"))
 assert(not target.exists("/Localizations/Russian.lang"))
-print("PASS: complete Lite install, defaults, language filtering, ALL libraries, existing disk preserved")
+print("PASS: minimal install without shell.getRunningProgram, defaults, ALL libraries and existing disk preserved")
 print("PASS: EEPROM backup in target + source, verified flash, boot-address assignment")
 -- Test EFI boot and hotkeys without loading the real graphical OS.
 local savedOS=target._entries["/OS.lua"]
@@ -350,58 +354,115 @@ for _,name in ipairs({"ZOS Hills","ZOS Teal"}) do
  assert(w.zosStatic);w.draw(w)
 end
 print("PASS: static wallpaper drawing bounds at 80x25")
--- Bootstrap regression: mkdir fails on an existing directory, as on the user's OpenOS.
-local downloads=newDisk("downloads")
-local remote={
- ['Installer/Manifest.lua']='return {files={{path="Applications/Test App.app/Main.lua",size=5,source="mineos"},{path="Applications/Test App.app/Icon.pic",size=4,remotePath="Applications/Test App.app/Icon.pic.b64",encoding="base64"}}}',
- ['Installer/install.lua']='-- mock installer',
- ['NOTICE.md']='notice', ['README-RU.md']='readme',
- ['mineos:Applications/Test App.app/Main.lua']='hello',
- ['system/Applications/Test App.app/Icon.pic.b64']='AAH+/w=='
-}
-local mfs={}
-for _,name in ipairs({'exists','isDirectory','makeDirectory'}) do mfs[name]=downloads[name] end
-mfs.path=pathFS.path;mfs.get=function()return downloads end
-local mio={}
-function mio.open(path,mode)
- local id,reason=downloads.open(path,mode);if not id then return nil,reason end
+-- Downloader regression tests: binary integrity, cache reuse and real OpenOS-style APIs.
+local dlDisk=newDisk('downloads')
+local dFS={path=pathFS.path}
+for _,name in ipairs({'exists','isDirectory','makeDirectory','rename','remove'}) do dFS[name]=dlDisk[name] end
+local function vopen(path,mode)
+ local id,why=dlDisk.open(path,mode);if not id then return nil,why end
  return {
-  write=function(self,s)local ok,why=downloads.write(id,s);if ok then return self end;return nil,why end,
-  read=function(_,format)return downloads.read(id,format=='*a' and math.huge or format)end,
-  close=function()return downloads.close(id)end
+  read=function(_,n)return dlDisk.read(id,(n=='*a' or n=='a') and math.huge or n)end,
+  write=function(self,s)local ok,reason=dlDisk.write(id,s);if ok then return self end;return nil,reason end,
+  close=function()return dlDisk.close(id)end
  }
 end
-local requestCount=0
-local comp={internet={}}
-function comp.isAvailable(name)return name=='internet' end
-function comp.internet.request(url)
- local prefix='https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/'
- local upstream='https://raw.githubusercontent.com/IgorTimofeev/MineOS/fb6c529e4d16198ad37dcc538ada99754294a456/'
- local official=url:sub(1,#upstream)==upstream
- if official then prefix=upstream end
- assert(url:sub(1,#prefix)==prefix)
- local path=url:sub(#prefix+1):gsub('%%(%x%x)',function(h)return string.char(tonumber(h,16))end)
- if official then path='mineos:'..path end
- local data=assert(remote[path],path);local pos=1;requestCount=requestCount+1
+local official='https://raw.githubusercontent.com/IgorTimofeev/MineOS/fb6c529e4d16198ad37dcc538ada99754294a456/'
+local own='https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/'
+local remote={};local requests={}
+local internet={}
+function internet.request(url)
+ requests[#requests+1]=url
+ local data=assert(remote[url],'Unexpected request: '..url);local pos=1
  return {finishConnect=function()return true end,response=function()return 200 end,
-  read=function(n)if pos>#data then return nil end;local chunk=data:sub(pos,pos+n-1);pos=pos+#chunk;return chunk end,
+  read=function(n)if pos>#data then return nil end;local s=data:sub(pos,pos+n-1);pos=pos+#s;return s end,
   close=function()end}
 end
-local executed={}
-local msh={execute=function(path,_,root)executed[#executed+1]={path,root};return true end}
-local bmodules={component=comp,filesystem=mfs,computer=computer,shell=msh}
-local benv=setmetatable({require=function(n)return assert(bmodules[n])end,io=mio,print=function()end,
- os=setmetatable({sleep=function()end},{__index=os})},{__index=_G})
-local bootstrapCode=file(ROOT..'/Installer/pastebin.lua')
-assert(load(bootstrapCode,'=bootstrap','t',benv))()
-assert(executed[1][2]=='/home/ZOS-download/')
-assert(downloads._entries['/home/ZOS-download/Installer/install.lua']=='-- mock installer')
-assert(downloads._entries['/home/ZOS-download/system/Applications/Test App.app/Main.lua']=='hello')
--- Leave the prior attempt intact and run into an unused suffix directory.
-assert(load(bootstrapCode,'=bootstrap','t',benv))()
-assert(executed[2][2]=='/home/ZOS-download-2/')
-assert(downloads._entries['/home/ZOS-download/Installer/install.lua']=='-- mock installer')
-assert(downloads._entries['/home/ZOS-download-2/system/Applications/Test App.app/Icon.pic']==string.char(0,1,254,255))
-assert(requestCount==12)
-print('PASS: bootstrap official pinned MineOS routing, own ZOS overlay, URL spaces and Base64 decoding')
-print('PASS: bootstrap rerun preserves old downloads and chooses an unused directory')
+local dc={internet=internet,isAvailable=function(name)return name=='internet' end,
+ list=function(name)local done=false;return function()if not done and name=='internet' then done=true;return 'internet' end end end,
+ proxy=function(address)assert(address=='internet');return internet end}
+local downloader=assert(load(file(ROOT..'/system/Libraries/ZOSDownload.lua'),'=downloader','t',_G))()
+local client=downloader.new({fs=dFS,open=vopen,component=dc,computer=computer,sleep=function()end,base=own})
+local info={path='Applications/Optional App.app/Icon.pic',size=4,adler=adler(string.char(0,1,254,255)),source='mineos'}
+remote[official..'Applications/Optional%20App.app/Icon.pic']=string.char(0,1,254,255)
+assert(client.download(info,'/new/icon.pic')=='downloaded')
+assert(dlDisk._entries['/new/icon.pic']==string.char(0,1,254,255))
+assert(client.download(info,'/new/icon.pic')=='cached');assert(#requests==1)
+dlDisk.makeDirectory('/home/ZOS-download-3/system/Applications/Optional App.app')
+dlDisk._entries['/home/ZOS-download-3/system/Applications/Optional App.app/Icon.pic']=string.char(0,1,254,255)
+assert(client.ensure(info,'/other/icon.pic',{'/home/ZOS-download-3/'})=='reused');assert(#requests==1)
+local encoded={path='Icons/Test.pic',remotePath='system/Icons/Test.pic.b64',encoding='base64',size=4,adler=info.adler}
+remote[own..encoded.remotePath]='AAH+/w=='
+client.download(encoded,'/other/encoded.pic');assert(dlDisk._entries['/other/encoded.pic']==string.char(0,1,254,255))
+remote[official..'Applications/Optional%20App.app/Icon.pic']='bad'
+dlDisk._entries['/other/broken.pic']='keep old'
+assert(not pcall(client.download,info,'/other/broken.pic'))
+assert(dlDisk._entries['/other/broken.pic']=='keep old')
+print('PASS: shared downloader uses pinned official sources, byte checks, atomic writes and Base64 decoding')
+print('PASS: validated existing and prior-cache files cause no repeat download')
+-- Bootstrap shows setup BEFORE app downloads and resumes the already downloaded folder -3.
+local licenseInfo={path='LICENSE',source='mineos',size=7,adler=adler('license')}
+local optional={path='Applications/Large Game.app/Main.lua',source='mineos',size=1000000,adler=1}
+local stubManifest='return '..serialize({mineosCommit='fb6c529e4d16198ad37dcc538ada99754294a456',files={licenseInfo,optional}})
+remote[own..'Installer/Manifest.lua']=stubManifest
+remote[own..'system/Libraries/ZOSDownload.lua']=file(ROOT..'/system/Libraries/ZOSDownload.lua')
+remote[own..'NOTICE.md']='notice'
+remote[own..'Installer/install.lua']=[[local root,context=...
+ assert(root=='/home/ZOS-download-3/')
+ assert(type(context.ensure)=='function')
+ SETUP_STARTED=true
+ return true]]
+dlDisk._entries['/home/ZOS-download-3/system/LICENSE']='license'
+dlDisk._entries['/home/ZOS-download-3/system/Applications/Large Game.app/Main.lua']='previously downloaded game'
+local envModules={component=dc,computer=computer,filesystem=dFS}
+local bootEnv=setmetatable({io={open=vopen},require=function(n)return assert(envModules[n])end,
+ print=function()end,os={sleep=function()end}},{__index=_G})
+function bootEnv.loadfile(path)
+ local h=assert(vopen(path,'rb'));local s=h:read('*a');h:close();return load(s,'='..path,'t',bootEnv)
+end
+local before=#requests
+assert(load(file(ROOT..'/Installer/pastebin.lua'),'=bootstrap','t',bootEnv))()
+assert(bootEnv.SETUP_STARTED and #requests==before+4)
+assert(dlDisk._entries['/home/ZOS-download-3/system/Applications/Large Game.app/Main.lua']=='previously downloaded game')
+for i=before+1,#requests do assert(not requests[i]:find('Applications/',1,true),'App downloaded before setup')end
+print('PASS: metadata-only bootstrap starts setup without fetching applications')
+print('PASS: folder from user screenshot is reused; complete prior downloads are preserved')
+-- An injected network context observes only the selected minimal set.
+target=newDisk('target');raw.target=target;eeprom.code=oldFirmware;eeprom.data=oldData;eeprom.label=oldLabel
+keys={28,28,28,28,28,208,28,28,208,28,28}
+local selected={}
+ok,why=installer(ROOT,{ensure=function(entry)
+ assert(#keys==1,'Downloads started before destination was confirmed')
+ selected[entry.path]=true;return 'cached'
+end})
+assert(ok,why)
+assert(not selected['Applications/3D Print.app/Main.lua'])
+assert(not selected['Applications/App Market.app/Main.lua'])
+assert(not selected['Applications/MineCode IDE.app/Main.lua'])
+assert(selected['Applications/Finder.app/Main.lua'] and selected['Applications/ZOS Software.app/Main.lua'])
+print('PASS: installer fetches only minimal system AFTER choices and destination confirmation')
+-- On-demand optional app installation starts only on api.install(), and can resume.
+local softFS=dFS
+function softFS.open(p,mode)return vopen(p,mode)end
+function softFS.readTable(path)
+ local h=assert(vopen(path,'rb'));local s=h:read('*a');h:close();return assert(load('return '..s,'=table','t',{}))()
+end
+function softFS.writeTable(path,data)
+ local h=assert(vopen(path,'wb'));assert(h:write(serialize(data)));h:close();return true
+end
+local laterData='return 42'
+local laterInfo={path='Applications/Later.app/Main.lua',size=#laterData,adler=adler(laterData),source='mineos'}
+dlDisk.makeDirectory('/ZOS')
+dlDisk._entries['/ZOS/Manifest.lua']='return '..serialize({files={laterInfo}})
+dlDisk._entries['/ZOS/Sources.cfg']=serialize({zosBase=own,mineosCommit='fb6c529e4d16198ad37dcc538ada99754294a456'})
+remote[official..laterInfo.path]=laterData
+local softModules={Filesystem=softFS,System={getUserSettings=function()return {localizationLanguage='Russian'} end},Event={sleep=function()end},ZOSDownload=downloader}
+local softEnv=setmetatable({require=function(n)return assert(softModules[n])end,component=dc,computer=setmetatable({pushSignal=function()end},{__index=computer})},{__index=_G})
+local software=assert(load(file(ROOT..'/system/Libraries/ZOSSoftware.lua'),'=software','t',softEnv))()
+local requestBefore=#requests
+assert(software.catalog()[1]=='Later' and #requests==requestBefore)
+local installed,path=software.install('Later');assert(installed,path)
+assert(path=='/Applications/Later.app/Main.lua' and dlDisk._entries[path]==laterData)
+assert(#requests==requestBefore+1)
+assert(not software.install('Later'))
+assert(not software.install('../OS'))
+print('PASS: optional catalog performs no download; selected app installs later and refuses overwrite/traversal')

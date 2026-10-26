@@ -1,8 +1,8 @@
-PASS: Lua 5.3 syntax, 119 Lua files
+PASS: Lua 5.3 syntax, 122 Lua files
 PASS: localization and theme table syntax
 PASS: manifest sizes and Adler-32 for every system file
 PASS: ZOS EFI fits a 4096-byte EEPROM
-PASS: complete Lite install, defaults, language filtering, ALL libraries, existing disk preserved
+PASS: minimal install without shell.getRunningProgram, defaults, ALL libraries and existing disk preserved
 PASS: EEPROM backup in target + source, verified flash, boot-address assignment
 PASS: EFI normal boot, F8 safe mode and F2 disk selection
 PASS: ZPK install, overwrite refusal, path traversal rejection and truncated package rejection
@@ -11,6 +11,10 @@ PASS: occupied destination disk is refused without modification
 PASS: injected EEPROM flash failure rolls back firmware, label and boot data
 PASS: taskbar minimize/restore, Start menu callbacks, RU localization and resize
 PASS: static wallpaper drawing bounds at 80x25
-PASS: bootstrap official pinned MineOS routing, own ZOS overlay, URL spaces and Base64 decoding
-PASS: bootstrap rerun preserves old downloads and chooses an unused directory
+PASS: shared downloader uses pinned official sources, byte checks, atomic writes and Base64 decoding
+PASS: validated existing and prior-cache files cause no repeat download
+PASS: metadata-only bootstrap starts setup without fetching applications
+PASS: folder from user screenshot is reused; complete prior downloads are preserved
+PASS: installer fetches only minimal system AFTER choices and destination confirmation
+PASS: optional catalog performs no download; selected app installs later and refuses overwrite/traversal
 All automated tests passed. Real OpenComputers testing remains required.

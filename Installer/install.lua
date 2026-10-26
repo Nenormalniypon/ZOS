@@ -8,9 +8,10 @@ local event=require("event")
 local serialization=require("serialization")
 local gpu=component.gpu
 local args={...}
-local script=shell.getRunningProgram()
-local root=args[1] or (fs.path(fs.path(script):gsub("/$","")))
-root=fs.canonical(root).."/"
+-- OpenOS shell has no getRunningProgram(). The launcher always passes the root.
+local root=assert(args[1],"Pass distribution folder: install.lua /home/ZOS-download-3")
+root=fs.canonical(root):gsub("/+$","").."/"
+local context=type(args[2])=="table" and args[2] or {}
 local mf=assert(io.open(root.."Installer/Manifest.lua","r"),"Distribution missing; pass its folder as argument")
 local manifestText=mf:read("*a");mf:close()
 local manifest=assert(load(manifestText,"=ZOS manifest","t",{}))()
@@ -68,11 +69,10 @@ local function chosenPath(path,lang,allLanguages,full,wall)
  local language=path:match("/([^/]+)%.lang$") or path:match("^Localizations/([^/]+)%.lang$")
  if language and not allLanguages and language~=lang and language~="English" then return false end
  local app=path:match("^Applications/([^/]+)/")
- local core={['Finder.app']=true,['Settings.app']=true,['Console.app']=true,['App Market.app']=true,
-  ['MineCode IDE.app']=true,['Picture View.app']=true,['Picture Edit.app']=true,['ZOS Packages.app']=true}
+ local core={['Finder.app']=true,['Settings.app']=true,['Console.app']=true,['ZOS Packages.app']=true,['ZOS Software.app']=true}
  if app and not full and not core[app] then return false end
  local wallpaper=path:match("^Wallpapers/([^/]+)/")
- if wallpaper and not full and wallpaper~="ZOS Hills.wlp" and wallpaper~="ZOS Teal.wlp" and wallpaper~="Solid color.wlp" and wallpaper~="Static picture.wlp" then return false end
+ if wallpaper and not full and wallpaper~=(wall==1 and "ZOS Hills.wlp" or wall==2 and "ZOS Teal.wlp" or "") then return false end
  return true
 end
 local function run()
@@ -92,8 +92,8 @@ local function run()
   tr("ZOS Teal — классический бирюзовый","ZOS Teal — classic teal"),
   tr("Без обоев","No wallpaper")})
  local full=menu(tr("Набор приложений","Applications"),{
-  tr("Lite: основные приложения; все библиотеки MineOS","Lite: core apps; every MineOS library"),
-  tr("Full: все приложения из исходного архива","Full: every app from the original archive")})==2
+  tr("Минимум: оболочка и системные инструменты; программы потом","Minimal: desktop and system tools; other apps later"),
+  tr("Full: скачать все приложения сейчас (долго)","Full: download ALL applications now (slow)")})==2
  screen(tr("Имя пользователя","User name"))
  print(tr("Латинские буквы/цифры/_/-; Enter = Guest","ASCII letters/digits/_/-; Enter = Guest"))
  local username=(term.read() or ""):gsub("%s+$","")
@@ -126,6 +126,14 @@ local function run()
  local target=candidates[menu(tr("Выберите ПУСТОЙ целевой диск","Select EMPTY destination disk"),labels)]
  if menu(tr("Записать ZOS на ","Write ZOS to ")..target.address:sub(1,8).."?",{
   tr("Отмена","Cancel"),tr("Установить","Install")})~=2 then return end
+ -- Network access starts only AFTER choices and target confirmation.
+ if context.ensure then
+  for i,info in ipairs(files) do
+   screen(tr("Загрузка только выбранного набора","Download selected files only"))
+   print(i.."/"..#files.."  "..info.path)
+   print(context.ensure(info))
+  end
+ end
  local stage="/.zos-staging/"
  ensureDirectory(target,stage)
  for _,directory in ipairs({"Libraries","Applications","Icons","Localizations","Extensions","Mounts","Temporary","Wallpapers","Themes","Users","ZOS"}) do
@@ -170,8 +178,11 @@ local function run()
  }))()
  defaults.localizationLanguage=lang;defaults.theme="ZOS Luna"
  defaults.networkName="ZOS-"..username
+ defaults.dockShortcuts={"/Applications/Finder.app/","/Applications/Settings.app/","/Applications/ZOS Software.app/","/Applications/ZOS Packages.app/"}
  defaults.interfaceWallpaperEnabled=wall~=3
  defaults.interfaceWallpaperPath=wall==1 and "/Wallpapers/ZOS Hills.wlp/" or wall==2 and "/Wallpapers/ZOS Teal.wlp/" or nil
+ writeProxy(target,stage.."ZOS/Manifest.lua",manifestText)
+ writeProxy(target,stage.."ZOS/Sources.cfg",serialization.serialize({zosBase=context.zosBase or "https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/",mineosCommit=manifest.mineosCommit or "fb6c529e4d16198ad37dcc538ada99754294a456"}))
  local versions={}
  for _,item in ipairs(files) do
   if item.id then versions[item.id]={path="/"..item.path,version=item.version or 1} end
@@ -181,7 +192,7 @@ local function run()
  for _,folder in ipairs({"Desktop","Applications","Application data","Trash","Downloads"}) do ensureDirectory(target,stage..home:sub(2)..folder) end
  writeProxy(target,stage..home:sub(2).."Settings.cfg",serialization.serialize(defaults))
  writeProxy(target,stage..home:sub(2).."Icon.pic",readFile(root.."system/Icons/User.pic"))
- for _,app in ipairs({"Finder","ZOS Packages","App Market","Settings"}) do
+ for _,app in ipairs({"Finder","ZOS Software","ZOS Packages","Settings"}) do
   writeProxy(target,stage..home:sub(2).."Desktop/"..app..".lnk","/Applications/"..app..".app/")
  end
  local eeprom=component.isAvailable("eeprom") and component.eeprom
