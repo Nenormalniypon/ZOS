@@ -14,8 +14,11 @@ function shell.install(system, GUI, screen, fs, paths)
  local function startMenu(ws, x, y)
   local menu = system.applyThemeToContextMenu(GUI.addContextMenu(ws, x, math.max(2, y - 13)))
   menu:addItem(tr("Мои файлы", "My files")).onTouch = function() launch(paths.system.applicationFinder, "-o", paths.user.home) end
-  menu:addItem(tr("Установка приложений", "Install applications")).onTouch = function() launch("/Applications/ZOS Packages.app/Main.lua") end
-  menu:addItem("MineOS App Market").onTouch = function() launch(paths.system.applicationAppMarket) end
+  menu:addItem(tr("Установка приложений", "Install applications")).onTouch = function() launch("/Applications/ZOS Software.app/Main.lua") end
+  menu:addItem("MineOS App Market").onTouch = function()
+   if fs.exists(paths.system.applicationAppMarket) then launch(paths.system.applicationAppMarket)
+   else launch("/Applications/ZOS Software.app/Main.lua", "App Market") end
+  end
   local apps = menu:addSubMenuItem(tr("Все программы", "All programs"))
   for _, folder in ipairs({paths.system.applications, paths.user.applications}) do
    for _, entry in ipairs(fs.list(folder)) do
