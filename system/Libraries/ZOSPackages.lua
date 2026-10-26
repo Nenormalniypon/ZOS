@@ -1,6 +1,14 @@
 -- Local ZPK1 app archives. Data only: no manifest code is evaluated.
 local fs=require("Filesystem")
 local packages={}
+local function ensureDirectory(path)
+ if fs.exists(path) then
+  assert(fs.isDirectory(path),"Not a directory: "..path)
+ else
+  local ok,reason=fs.makeDirectory(path)
+  assert(ok,reason or ("Cannot create directory: "..path))
+ end
+end
 function packages.validPath(path)
  if type(path)~="string" or #path==0 or #path>180 or path:sub(1,1)=="/" or path:find("\\",1,true) or path:find("[%c:]") then return false end
  for part in path:gmatch("[^/]+") do if part=="." or part==".." then return false end end
@@ -20,7 +28,7 @@ function packages.install(archive)
   staging="/Applications/.zos-"..name..".stage"
   assert(not fs.exists(target),"Application exists; no files were replaced")
   assert(not fs.exists(staging),"Old staging directory exists; inspect it first")
-  assert(fs.makeDirectory(staging))
+  ensureDirectory(staging)
   local total,seen,main=0,{},false
   for _=1,count do
    local path=input:readLine()
@@ -30,7 +38,7 @@ function packages.install(archive)
    assert(size and size%1==0 and size>=0 and size<=1024*1024,"Invalid file size")
    total=total+size; assert(total<=4*1024*1024,"Package is too large")
    local full=staging.."/"..path
-   assert(fs.makeDirectory(fs.path(full)))
+   ensureDirectory(fs.path(full))
    output=assert(fs.open(full,"wb"))
    local left=size
    while left>0 do
