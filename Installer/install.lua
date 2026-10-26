@@ -18,6 +18,7 @@ local manifest=assert(load(manifestText,"=ZOS manifest","t",{}))()
 local oldBG,oldFG=gpu.getBackground(),gpu.getForeground()
 local oldX,oldY=gpu.getResolution()
 local ru=false
+local currentFile
 local function tr(a,b) return ru and a or b end
 local function screen(title)
  gpu.setBackground(0x0000AA);gpu.setForeground(0xFFFFFF);term.clear();term.setCursor(2,2)
@@ -129,6 +130,7 @@ local function run()
  -- Network access starts only AFTER choices and target confirmation.
  if context.ensure then
   for i,info in ipairs(files) do
+   currentFile=info.path
    screen(tr("Загрузка только выбранного набора","Download selected files only"))
    print(i.."/"..#files.."  "..info.path)
    print(context.ensure(info))
@@ -140,6 +142,7 @@ local function run()
   ensureDirectory(target,stage..directory)
  end
  for i,file in ipairs(files) do
+  currentFile=file.path
   screen(tr("Копирование и проверка","Copy and verify"))
   print(math.floor((i-1)/#files*100).."%  "..file.path)
   assert(not file.path:find("..",1,true) and file.path:sub(1,1)~="/","Unsafe manifest path")
@@ -239,7 +242,22 @@ local function run()
  print(tr("OpenOS не удалена. Резервная копия EEPROM: ZOS/Backup/.","OpenOS was not erased. EEPROM backup: ZOS/Backup/."))
  print(tr("Файлы проверены Adler-32 (не криптографическая подпись).","Files checked with Adler-32 (not a cryptographic signature)."))
 end
-local ok,why=xpcall(run,debug.traceback)
+local ok,why=xpcall(run,function(err)return debug.traceback(tostring(err),2)end)
 gpu.setBackground(oldBG);gpu.setForeground(oldFG)
-if not ok then io.stderr:write(tostring(why).."\n");io.stderr:write("No disks were formatted. Inspect .zos-staging after a failed copy.\n") end
+if not ok then
+ local report="ZOS INSTALL ERROR\nSource folder: "..root.."\nFile: "..tostring(currentFile or "setup / disk selection").."\n\n"..tostring(why).."\n"
+ if context.report then context.report(report)
+ else
+  pcall(function()
+   local log=io.open("/home/zos-error.log","wb")
+   if log then log:write(report);log:close() end
+  end)
+ end
+ print("ZOS: setup stopped. No disk was formatted.")
+ if currentFile then print("File: "..currentFile) end
+ local first=tostring(why):match("[^\r\n]+") or "Unknown error"
+ print(first:sub(1,math.max(20,oldX-1)))
+ print("Full error: /home/zos-error.log")
+ print("Open with: edit /home/zos-error.log")
+end
 return ok,why

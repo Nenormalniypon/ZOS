@@ -1,5 +1,16 @@
--- ZOS setup: download metadata first, show setup, then fetch only selected core files.
+-- ZOS diagnostic launcher: reports failures without flooding the screen.
 local args={...}
+local function saveError(report)
+ local ok,saved=pcall(function()
+  local h=io.open("/home/zos-error.log","wb")
+  if not h then return false end
+  local written=h:write(tostring(report));h:close()
+  return written~=nil and written~=false
+ end)
+ return ok and saved
+end
+local function main()
+-- ZOS setup: download metadata first, show setup, then fetch only selected core files.
 local BASE=args[1] or "https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/"
 assert(BASE:match("^https://") and not BASE:find("[%s?#]"),"HTTPS repository URL required")
 if BASE:sub(-1)~="/" then BASE=BASE.."/" end
@@ -34,11 +45,13 @@ local function metadata(path)
    local chunk,reason=conn.read(8192);if not chunk then assert(not reason,reason);break end
    assert(out:write(chunk));os.sleep(0)
   end
-  assert(out:close());out=nil
+  -- OpenOS handles may successfully close with zero return values.
+  local closed,closeReason=out:close();out=nil
+  assert(closed~=false and closeReason==nil,closeReason or "Failed to close metadata file")
   if fs.exists(dest) then assert(not fs.isDirectory(dest));assert(fs.remove(dest)) end
   assert(fs.rename(dest..".part",dest))
  end,debug.traceback)
- if out then out:close() end;conn.close();assert(ok,why)
+ if out then pcall(out.close,out) end;pcall(conn.close);assert(ok,why)
 end
 print("ZOS: loading setup only. Applications will NOT be downloaded yet.")
 print("Reusing download folder: "..ROOT)
@@ -47,11 +60,21 @@ local h=assert(io.open(ROOT.."Installer/Manifest.lua","rb"));local text=h:read("
 local manifest=assert(load(text,"=manifest","t",{}))()
 local downloader=assert(loadfile(ROOT.."system/Libraries/ZOSDownload.lua"))()
 local client=downloader.new({fs=fs,open=io.open,component=component,computer=computer,sleep=os.sleep,base=BASE,commit=manifest.mineosCommit})
-local context={zosBase=BASE,ensure=function(info)
+local context={zosBase=BASE,report=saveError,ensure=function(info)
  return client.ensure(info,ROOT.."system/"..info.path,roots)
 end}
 -- Read source license before setup; never download application files here.
 for _,info in ipairs(manifest.files) do if info.path=="LICENSE" then context.ensure(info);break end end
 local installer=assert(loadfile(ROOT.."Installer/install.lua"))
 local ok,why=installer(ROOT,context)
-assert(ok,why or "Setup did not complete")
+if not ok then return end -- installer already saved and displayed a short diagnostic
+
+end
+local ok,why=xpcall(main,function(err)return debug.traceback(tostring(err),2)end)
+if not ok then
+ local saved=saveError("ZOS LAUNCHER ERROR\n\n"..tostring(why).."\n")
+ print("ZOS: stopped while loading setup. Existing downloads were kept.")
+ print((tostring(why):match("[^\r\n]+") or "Unknown error"):sub(1,150))
+ if saved then print("Full error: /home/zos-error.log");print("Open with: edit /home/zos-error.log")
+ else print("Could not write /home/zos-error.log. Check free space and disk permissions.") end
+end
