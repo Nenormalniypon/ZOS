@@ -1,0 +1,6 @@
+ZPK1
+Hello
+1
+Main.lua
+75
+require("GUI").alert("Hello from a MineOS-compatible application on ZOS!")
