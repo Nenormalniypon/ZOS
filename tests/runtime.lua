@@ -353,10 +353,10 @@ print("PASS: static wallpaper drawing bounds at 80x25")
 -- Bootstrap regression: mkdir fails on an existing directory, as on the user's OpenOS.
 local downloads=newDisk("downloads")
 local remote={
- ['Installer/Manifest.lua']='return {files={{path="Applications/Test App.app/Main.lua",size=5},{path="Applications/Test App.app/Icon.pic",size=4,remotePath="Applications/Test App.app/Icon.pic.b64",encoding="base64"}}}',
+ ['Installer/Manifest.lua']='return {files={{path="Applications/Test App.app/Main.lua",size=5,source="mineos"},{path="Applications/Test App.app/Icon.pic",size=4,remotePath="Applications/Test App.app/Icon.pic.b64",encoding="base64"}}}',
  ['Installer/install.lua']='-- mock installer',
  ['NOTICE.md']='notice', ['README-RU.md']='readme',
- ['system/Applications/Test App.app/Main.lua']='hello',
+ ['mineos:Applications/Test App.app/Main.lua']='hello',
  ['system/Applications/Test App.app/Icon.pic.b64']='AAH+/w=='
 }
 local mfs={}
@@ -376,8 +376,12 @@ local comp={internet={}}
 function comp.isAvailable(name)return name=='internet' end
 function comp.internet.request(url)
  local prefix='https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/'
+ local upstream='https://raw.githubusercontent.com/IgorTimofeev/MineOS/fb6c529e4d16198ad37dcc538ada99754294a456/'
+ local official=url:sub(1,#upstream)==upstream
+ if official then prefix=upstream end
  assert(url:sub(1,#prefix)==prefix)
  local path=url:sub(#prefix+1):gsub('%%(%x%x)',function(h)return string.char(tonumber(h,16))end)
+ if official then path='mineos:'..path end
  local data=assert(remote[path],path);local pos=1;requestCount=requestCount+1
  return {finishConnect=function()return true end,response=function()return 200 end,
   read=function(n)if pos>#data then return nil end;local chunk=data:sub(pos,pos+n-1);pos=pos+#chunk;return chunk end,
@@ -399,5 +403,5 @@ assert(executed[2][2]=='/home/ZOS-download-2/')
 assert(downloads._entries['/home/ZOS-download/Installer/install.lua']=='-- mock installer')
 assert(downloads._entries['/home/ZOS-download-2/system/Applications/Test App.app/Icon.pic']==string.char(0,1,254,255))
 assert(requestCount==12)
-print('PASS: bootstrap strict mkdir semantics, reused parents, URL spaces and Base64 asset decoding')
+print('PASS: bootstrap official pinned MineOS routing, own ZOS overlay, URL spaces and Base64 decoding')
 print('PASS: bootstrap rerun preserves old downloads and chooses an unused directory')

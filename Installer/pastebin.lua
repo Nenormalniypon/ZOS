@@ -1,4 +1,4 @@
--- ZOS 0.1.0 mkdir hotfix: https://github.com/Nenormalniypon/ZOS
+-- ZOS: official pinned MineOS base + small ZOS overlay. https://github.com/Nenormalniypon/ZOS
 -- Paste this entire file into Pastebin. Run: pastebin run YOUR_ID
 local args={...}
 local BASE=args[1] or "https://raw.githubusercontent.com/Nenormalniypon/ZOS/main/"
@@ -55,10 +55,10 @@ local function decodeBase64(data)
  end
  return table.concat(out)
 end
-local function fetch(path,destination,encoding)
+local function fetch(path,destination,encoding,baseURL)
  assert(not encoding or encoding=="base64","Unknown repository encoding")
  path=safe(path)
- local url=BASE..path:gsub("([^%w%-%_%.%~/])",function(c) return string.format("%%%02X",c:byte()) end)
+ local url=(baseURL or BASE)..path:gsub("([^%w%-%_%.%~/])",function(c) return string.format("%%%02X",c:byte()) end)
  local conn=assert(component.internet.request(url))
  local out
  local ok,reason=xpcall(function()
@@ -96,6 +96,10 @@ print("Destination: "..ROOT)
 fetch("Installer/Manifest.lua",ROOT.."Installer/Manifest.lua")
 local h=assert(io.open(ROOT.."Installer/Manifest.lua","rb"));local data=h:read("*a");h:close()
 local manifest=assert(load(data,"=manifest","t",{}))()
+local mineosCommit=manifest.mineosCommit or "fb6c529e4d16198ad37dcc538ada99754294a456"
+assert(type(mineosCommit)=="string" and #mineosCommit==40 and mineosCommit:match("^%x+$"),"Invalid MineOS commit")
+local MINEOS="https://raw.githubusercontent.com/IgorTimofeev/MineOS/"..mineosCommit.."/"
+print("MineOS source: IgorTimofeev/MineOS @ "..mineosCommit:sub(1,12))
 local source=fs.get(ROOT)
 local required=0
 for _,item in ipairs(manifest.files) do required=required+item.size end
@@ -103,7 +107,13 @@ assert(source.spaceTotal()-source.spaceUsed()>required+256*1024,"Not enough spac
 for _,path in ipairs({"Installer/install.lua","NOTICE.md","README-RU.md"}) do fetch(path,ROOT..path) end
 for i,file in ipairs(manifest.files) do
  print(i.."/"..#manifest.files.." "..file.path)
- fetch("system/"..safe(file.remotePath or file.path),ROOT.."system/"..safe(file.path),file.encoding)
+ local destination=ROOT.."system/"..safe(file.path)
+ if file.source=="mineos" then
+  fetch(safe(file.upstreamPath or file.path),destination,nil,MINEOS)
+ else
+  assert(not file.source or file.source=="zos","Unknown file source")
+  fetch("system/"..safe(file.remotePath or file.path),destination,file.encoding)
+ end
 end
 print("Downloaded. Read NOTICE.md and system/LICENSE before installing.")
 assert(shell.execute(ROOT.."Installer/install.lua",nil,ROOT))

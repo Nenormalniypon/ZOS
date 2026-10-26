@@ -20,17 +20,23 @@ upstream={}
 for match in re.finditer(r'\{\s*path\s*=\s*"([^"]+)"([^{}]*?)\}',(root/'tools/MineOS-Files.cfg').read_text(),re.S):
  item_id=re.search(r'\bid\s*=\s*(\d+)',match[2]);version=re.search(r'\bversion\s*=\s*(\d+)',match[2])
  if item_id:upstream[match[1]]=(int(item_id[1]),int(version[1]) if version else 1)
+sourceConfig=json.loads((root/'tools/MineOS-source.json').read_text()) if (root/'tools/MineOS-source.json').exists() else None
 entries=[]
 for relative,data in sorted(logical.items()):
  extra=''
  try:data.decode('utf8');binary=False
  except UnicodeDecodeError:binary=True
- if binary:
+ officialPath=sourceConfig['files'].get(relative) if sourceConfig else None
+ if officialPath:
+  extra=',source="mineos"'
+  if officialPath!=relative:extra+=',upstreamPath='+json.dumps(officialPath,ensure_ascii=False)
+ elif binary:
   (system/(relative+'.b64')).write_bytes(base64.b64encode(data))
   extra=',remotePath='+json.dumps(relative+'.b64')+',encoding="base64"'
  if relative in upstream: extra+=',id=%d,version=%d'%upstream[relative]
  entries.append('{path='+json.dumps(relative,ensure_ascii=False)+f',size={len(data)},adler={zlib.adler32(data)}'+extra+'}')
 languages=sorted(p.stem for p in (root/'system/Localizations').glob('*.lang'))
-(root/'Installer/Manifest.lua').write_text('return {version="0.1.0",languages={'+','.join(json.dumps(s) for s in languages)+'},files={\n'+',\n'.join(entries)+'\n}}\n')
+sourceHeader=(',mineosCommit='+json.dumps(sourceConfig['commit'])) if sourceConfig else ''
+(root/'Installer/Manifest.lua').write_text('return {version="0.1.0"'+sourceHeader+',languages={'+','.join(json.dumps(s) for s in languages)+'},files={\n'+',\n'.join(entries)+'\n}}\n')
 (root/'SHA256SUMS').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.relative_to(root).as_posix()+'\n' for p in sorted(root.rglob('*')) if p.is_file() and p.name!='SHA256SUMS' and '__pycache__' not in str(p)))
 print(len(logical),'logical system files;',sum(map(len,logical.values())),'decoded bytes')
